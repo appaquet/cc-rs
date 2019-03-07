@@ -1206,7 +1206,7 @@ impl Build {
                     cmd.push_opt_unless_duplicate(format!("-O{}", opt_level).into());
                 }
 
-                if !target.contains("-ios") {
+                if !target.contains("-ios") && !target.contains("-watchos") {
                     cmd.push_cc_arg("-ffunction-sections".into());
                     cmd.push_cc_arg("-fdata-sections".into());
                 }
@@ -1411,7 +1411,7 @@ impl Build {
             }
         }
 
-        if target.contains("-ios") {
+        if target.contains("-ios") || target.contains("-watchos") {
             // FIXME: potential bug. iOS is always compiled with Clang, but Gcc compiler may be
             // detected instead.
             self.ios_flags(cmd)?;
@@ -1572,8 +1572,10 @@ impl Build {
 
     fn ios_flags(&self, cmd: &mut Tool) -> Result<(), Error> {
         enum ArchSpec {
-            Device(&'static str),
-            Simulator(&'static str),
+            IphoneDevice(&'static str),
+            WatchDevice(&'static str),
+            IphoneSimulator(&'static str),
+            WatchSimulator(&'static str),
         }
 
         let target = self.get_target()?;
@@ -1583,12 +1585,16 @@ impl Build {
                 "Unknown architecture for iOS target.",
             )
         })?;
+
+        let is_watchos = target.contains("-watchos");
         let arch = match arch {
-            "arm" | "armv7" | "thumbv7" => ArchSpec::Device("armv7"),
-            "armv7s" | "thumbv7s" => ArchSpec::Device("armv7s"),
-            "arm64" | "aarch64" => ArchSpec::Device("arm64"),
-            "i386" | "i686" => ArchSpec::Simulator("-m32"),
-            "x86_64" => ArchSpec::Simulator("-m64"),
+            "arm" | "armv7" | "thumbv7" => ArchSpec::IphoneDevice("armv7"),
+            "armv7k" => ArchSpec::WatchDevice("armv7k"),
+            "armv7s" | "thumbv7s" => ArchSpec::IphoneDevice("armv7s"),
+            "arm64" | "aarch64" => ArchSpec::IphoneDevice("arm64"),
+            "i386" if is_watchos => ArchSpec::WatchSimulator("-m32"),
+            "i386" | "i686" => ArchSpec::IphoneSimulator("-m32"),
+            "x86_64" => ArchSpec::IphoneSimulator("-m64"),
             _ => {
                 return Err(Error::new(
                     ErrorKind::ArchitectureInvalid,
@@ -1598,16 +1604,27 @@ impl Build {
         };
 
         let sdk = match arch {
-            ArchSpec::Device(arch) => {
+            ArchSpec::IphoneDevice(arch) => {
                 cmd.args.push("-arch".into());
                 cmd.args.push(arch.into());
                 cmd.args.push("-miphoneos-version-min=7.0".into());
                 "iphoneos"
             }
-            ArchSpec::Simulator(arch) => {
+            ArchSpec::WatchDevice(arch) => {
+                cmd.args.push("-arch".into());
+                cmd.args.push(arch.into());
+                cmd.args.push("-mwatchos-version-min=2.0".into());
+                "watchos"
+            }
+            ArchSpec::IphoneSimulator(arch) => {
                 cmd.args.push(arch.into());
                 cmd.args.push("-mios-simulator-version-min=7.0".into());
                 "iphonesimulator"
+            }
+            ArchSpec::WatchSimulator(arch) => {
+                cmd.args.push(arch.into());
+                cmd.args.push("-mwatchos-simulator-version-min=2.0".into());
+                "watchsimulator"
             }
         };
 
